@@ -19,7 +19,7 @@
  * Main entry point — PlayCanvas app initialization, GSplat loading (.ply/.sog/.splat), game loop.
  */
 
-import { parsePlyForPositions, analyzePlyDistances, parsePlyOpacities, parsePlyRawCentroid, countFilteredPoints } from './ply-parser.js';
+import { parsePlyForPositions, analyzePlyDistances, parsePlyOpacities, parsePlyRawCentroid, countFilteredPoints, sanitizePlyBuffer } from './ply-parser.js';
 import { parseSplatForPositions, parseSplatOpacities, parseSplatRawCentroid, splatToPlyBuffer } from './splat-parser.js';
 import { parseSogForPositions, parseSogOpacities, parseSogRawCentroid } from './sog-parser.js';
 import { Octree } from './collision.js';
@@ -336,6 +336,12 @@ function enterPlacementMode() {
         spawnPoint = { x: 0, y: 0, z: 0 };
     }
 
+    // Re-enable unified rendering for filter shader (work-buffer modifier)
+    const gsplatEntity = app.root.findByName('gsplat-scene');
+    if (gsplatEntity && gsplatEntity.gsplat) {
+        try { gsplatEntity.gsplat.unified = true; } catch (_) {}
+    }
+
     // Orbit camera around spawn point
     orbitTarget = { x: spawnPoint.x, y: spawnPoint.y, z: spawnPoint.z };
     updateSpawnMarker(spawnPoint);
@@ -366,6 +372,16 @@ function confirmSpawnAndFly() {
     if (spawnMarkerEntity) spawnMarkerEntity.enabled = false;
     const coordsEl = document.getElementById('spawn-coords');
     if (coordsEl) coordsEl.style.display = 'none';
+
+    // Disable unified rendering so that SH (spherical-harmonic) colours are
+    // evaluated per-frame with the current camera view direction.  In unified
+    // mode the work buffer bakes SH at copy-time; since the gsplat entity
+    // never moves during flight the buffer is never refreshed, causing
+    // rainbow flickering when the camera yaws.
+    const gsplatEntity = app.root.findByName('gsplat-scene');
+    if (gsplatEntity && gsplatEntity.gsplat) {
+        try { gsplatEntity.gsplat.unified = false; } catch (_) {}
+    }
 
     // Set drone spawn and reset
     drone.setSpawnPoint(spawnPoint.x, spawnPoint.y, spawnPoint.z);
@@ -501,6 +517,13 @@ async function loadSceneFile(file) {
 
         console.log(`Initial parse: ${initialParse.vertexCount} vertices (${ext}, ${defaultCoord}), bounds:`, initialParse.bounds);
         let analysis = analyzePlyDistances(initialParse.positions, initialParse.vertexCount);
+
+        // ---- Sanitize render buffer (replace NaN/Inf in all float properties) ----
+        if (ext === 'ply' || ext === 'splat') {
+            loadingProgress.textContent = 'Sanitizing point cloud data...';
+            await sleep(10);
+            sanitizePlyBuffer(renderBuffer);
+        }
 
         // ---- Load GSplat into PlayCanvas ----
         loadingProgress.textContent = 'Loading 3D Gaussian Splat...';

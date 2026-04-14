@@ -538,6 +538,106 @@ export function filterPlyByDistance(arrayBuffer, positions, vertexCount, cx, cy,
     return { filteredBuffer: newBuffer, keptCount: keepIndices.length };
 }
 
+/**
+ * Sanitize a binary PLY ArrayBuffer in-place: replace every NaN / ±Inf in
+ * float32 and float64 vertex properties with 0.  Returns the same buffer
+ * (mutated) so it can be used as a drop-in replacement before passing to
+ * the renderer.  ASCII PLY files are returned unchanged.
+ *
+ * This prevents corrupt SH / scale / rotation values from producing
+ * rainbow-coloured flickering artifacts during camera rotation.
+ */
+export function sanitizePlyBuffer(arrayBuffer) {
+    const bytes = new Uint8Array(arrayBuffer);
+    const decoder = new TextDecoder('utf-8');
+
+    // ---- locate header end ----
+    let headerEnd = -1;
+    for (let i = 0; i < Math.min(bytes.length, 65536); i++) {
+        if (bytes[i] === 0x65 && bytes[i+1] === 0x6e && bytes[i+2] === 0x64 &&
+            bytes[i+3] === 0x5f && bytes[i+4] === 0x68 && bytes[i+5] === 0x65 &&
+            bytes[i+6] === 0x61 && bytes[i+7] === 0x64 && bytes[i+8] === 0x65 &&
+            bytes[i+9] === 0x72) {
+            let j = i + 10;
+            while (j < bytes.length && bytes[j] !== 0x0a) j++;
+            headerEnd = j + 1;
+            break;
+        }
+    }
+    if (headerEnd === -1) return arrayBuffer; // not a valid PLY
+
+    const headerText = decoder.decode(bytes.slice(0, headerEnd));
+    const headerLines = headerText.split('\n').map(l => l.trim());
+
+    // Only process binary formats
+    let format = 'ascii';
+    for (const line of headerLines) {
+        if (line.startsWith('format')) {
+            if (line.includes('binary_little_endian')) format = 'binary_little_endian';
+            else if (line.includes('binary_big_endian')) format = 'binary_big_endian';
+        }
+    }
+    if (format === 'ascii') return arrayBuffer;
+
+    const isLittle = format === 'binary_little_endian';
+
+    // ---- parse vertex element properties ----
+    let vertexCount = 0;
+    const properties = []; // { type, size, isFloat }
+    let inVertex = false;
+
+    for (const line of headerLines) {
+        if (line.startsWith('element vertex')) {
+            vertexCount = parseInt(line.split(/\s+/)[2], 10);
+            inVertex = true;
+        } else if (line.startsWith('element') && inVertex) {
+            inVertex = false;
+        } else if (line.startsWith('property') && inVertex) {
+            const type = line.split(/\s+/)[1];
+            const size = _getPropertySize(type);
+            const isFloat = (type === 'float' || type === 'float32' || type === 'double' || type === 'float64');
+            properties.push({ type, size, isFloat });
+        }
+    }
+
+    if (vertexCount === 0 || properties.length === 0) return arrayBuffer;
+
+    const vertexStride = properties.reduce((a, p) => a + p.size, 0);
+    const dv = new DataView(arrayBuffer, headerEnd);
+    let fixed = 0;
+
+    for (let i = 0; i < vertexCount; i++) {
+        let off = i * vertexStride;
+        for (const prop of properties) {
+            if (prop.isFloat) {
+                if (prop.size === 4) {
+                    const v = dv.getFloat32(off, isLittle);
+                    if (!isFinite(v)) { dv.setFloat32(off, 0, isLittle); fixed++; }
+                } else if (prop.size === 8) {
+                    const v = dv.getFloat64(off, isLittle);
+                    if (!isFinite(v)) { dv.setFloat64(off, 0, isLittle); fixed++; }
+                }
+            }
+            off += prop.size;
+        }
+    }
+
+    if (fixed > 0) {
+        console.warn(`sanitizePlyBuffer: replaced ${fixed} NaN/Inf values in ${vertexCount} vertices`);
+    }
+    return arrayBuffer;
+}
+
+function _getPropertySize(type) {
+    switch (type) {
+        case 'char': case 'int8': case 'uchar': case 'uint8': return 1;
+        case 'short': case 'int16': case 'ushort': case 'uint16': return 2;
+        case 'int': case 'int32': case 'uint': case 'uint32': case 'float': case 'float32': return 4;
+        case 'double': case 'float64': return 8;
+        default: return 4;
+    }
+}
+
 function getPropertySize(type) {
     switch (type) {
         case 'char': case 'int8': case 'uchar': case 'uint8': return 1;
