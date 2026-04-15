@@ -28,7 +28,7 @@ const SETTINGS_IDS = [
     'flight-mode-select',
     'cam-hfov',
     'cam-mount-angle',
-    'ctrl-pos-kp', 'ctrl-pos-ki', 'ctrl-vel-kp', 'ctrl-vel-ki', 'ctrl-alt-kp', 'ctrl-alt-ki',
+    'ctrl-pos-kp', 'ctrl-pos-ki', 'ctrl-pos-kd', 'ctrl-vel-kp', 'ctrl-vel-ki', 'ctrl-vel-kd', 'ctrl-alt-kp', 'ctrl-alt-ki', 'ctrl-alt-kd',
     'phys-mass', 'phys-thrust', 'phys-drag-cd', 'phys-drag-area',
     'phys-drone-size', 'phys-collision-radius',
 ];
@@ -1420,6 +1420,9 @@ export class Controller {
         this._bindPhysicsSlider('ctrl-vel-ki', 'ctrl-vel-ki-val');
         this._bindPhysicsSlider('ctrl-alt-kp', 'ctrl-alt-kp-val');
         this._bindPhysicsSlider('ctrl-alt-ki', 'ctrl-alt-ki-val');
+        this._bindPhysicsSlider('ctrl-pos-kd', 'ctrl-pos-kd-val');
+        this._bindPhysicsSlider('ctrl-vel-kd', 'ctrl-vel-kd-val');
+        this._bindPhysicsSlider('ctrl-alt-kd', 'ctrl-alt-kd-val');
     }
 
     _bindSliderNum(sliderId, numId) {
